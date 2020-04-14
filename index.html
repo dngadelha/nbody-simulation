@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html class="w-100 h-100 overflow-hidden">
+	<head>
+		<meta charset="utf-8">
+		<meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+		<title>N-Body Simulation</title>
+		<script type="text/javascript" src="three/three.min.js"></script>
+		<script type="text/javascript" src="three/modules/dat.gui.module.js"></script>
+		<script type="text/javascript" src="three/modules/stats.module.js"></script>
+		<script type="text/javascript" src="three/modules/OrbitControls.js"></script>
+		<script type="text/javascript" src="simulation.js"></script>
+		<link rel="stylesheet" href="css/bootstrap.min.css">
+		<link rel="stylesheet" href="css/animate.min.css">
+	</head>
+	<body class="w-100 h-100" style="background-color: #000;">
+		<div id="overlay" class="row no-gutters position-absolute p-3 d-flex flex-column align-items-center justify-content-center text-center text-white animated bounceIn" style="top: 0; bottom: 0; left: 0; right: 0;">
+			<div class="col-lg-4 col-md-6 col-sm-8 p-3 p-sm-0">
+				<img src="logo.svg" alt="nbody." class="mb-3" style="max-width: 15rem;">
+				<p class="font-weight-light">Um experimento feito por Danilo Gadêlha e Jeremias Júnior</p>
+				<div class="input-group">
+					<input type="number" class="form-control" id="particle-amount" placeholder="Quantidade de Partículas" min="1" style="font-size: 1.25rem;" oninput="updateLayout();">
+					<div class="input-group-append" id="button-addon4">
+						<button class="btn btn-secondary" type="button" id="simulate-button" onclick="simulate();">Simular</button>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<script type="x-shader/x-vertex" id="vertexshader">
+			attribute float size;
+			attribute vec4 color;
+
+			varying vec4 particleColor;
+			varying vec3 particlePosition;
+
+			void main() {
+				particleColor = color;
+				particlePosition = position;
+
+				vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+				gl_PointSize = size * (300.0 / -mvPosition.z);
+				gl_Position = projectionMatrix * mvPosition;
+			}
+		</script>
+		<script type="x-shader/x-fragment" id="fragmentshader">
+			varying vec4 particleColor;
+			varying vec3 particlePosition;
+			uniform float totalParticles;
+
+			void main() {
+				gl_FragColor = particleColor;
+			}
+		</script>
+		<script type="text/javascript">
+			var universe = new Universe(1);
+			var camera, renderer, scene, object, stats;
+
+			function animateCSS(element, animationName, callback) {
+				element.classList.add("animated", animationName);
+
+				function handleAnimationEnd() {
+					element.classList.remove("animated", animationName);
+					element.removeEventListener("animationend", handleAnimationEnd);
+					if (typeof callback === "function") callback();
+				}
+
+				element.addEventListener("animationend", handleAnimationEnd);
+			}
+
+			function updateLayout() {
+				var particleAmount = document.getElementById("particle-amount");
+				var simulateButton = document.getElementById("simulate-button");
+				simulateButton.disabled = (!particleAmount.value || particleAmount.value.length == 0 || parseInt(particleAmount.value) <= 0);
+			}
+
+			function simulate() {
+				var particleAmount = parseInt(document.getElementById("particle-amount").value);
+
+				var overlay = document.getElementById("overlay");
+				overlay.classList.remove("animated");
+				overlay.classList.remove("bounceIn");
+
+				animateCSS(overlay, "bounceOut", function() {
+					overlay.parentElement.removeChild(overlay);
+					overlay = null;
+
+					universe.initParticles(particleAmount);
+
+					init();
+					render();
+				});
+			}
+
+			updateLayout();
+
+			function init() {
+				camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 1, 100000000);
+				camera.position.z = 300;
+
+				scene = new THREE.Scene();
+
+				var totalParticles = universe.getTotalParticles();
+
+				var positions = new Float32Array(totalParticles * 3);
+				var colors = new Float32Array(totalParticles * 4);
+				var sizes = new Float32Array(totalParticles);
+
+				for (var i = 0; i < totalParticles; i++) {
+					var particle = universe.getParticle(i);
+
+					positions[(i * 3)] = particle.x;
+					positions[(i * 3) + 1] = particle.y;
+					positions[(i * 3) + 2] = particle.z;
+
+					colors[(i * 4)] = (particle.x / 200) + 0.5;
+					colors[(i * 4) + 1] = (particle.y / 200) + 0.5;
+					colors[(i * 4) + 2] = (particle.z / 200) + 0.5;
+					colors[(i * 4) + 3] = 1.0;
+
+					sizes[i] = particle.size;
+				}
+
+				var geometry = new THREE.BufferGeometry();
+				geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+				geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+				geometry.setAttribute("size", new THREE.BufferAttribute(sizes, 1));
+
+				object = new THREE.Points(geometry,
+					new THREE.ShaderMaterial({
+						uniforms: {
+							totalParticles: parseFloat(totalParticles)
+						},
+
+						vertexShader: document.getElementById("vertexshader").textContent,
+						fragmentShader: document.getElementById("fragmentshader").textContent,
+
+						blending: THREE.AdditiveBlending,
+						depthTest: true,
+						transparent: false
+					})
+				);
+
+				scene.add(object);
+
+				renderer = new THREE.WebGLRenderer();
+				renderer.setPixelRatio(window.devicePixelRatio);
+				renderer.setSize(window.innerWidth, window.innerHeight);
+
+				document.body.appendChild(renderer.domElement);
+
+				var controls = new OrbitControls(camera, renderer.domElement);
+				controls.rotateSpeed = 1.0;
+				controls.zoomSpeed = 1.2;
+				controls.panSpeed = 0.8;
+				controls.keys = [65, 83, 68];
+
+				window.addEventListener("resize", onWindowResize, false);
+
+				stats = new Stats();
+				document.body.appendChild(stats.dom);
+
+				var gui = new GUI();
+				gui.add(universe, 'gravityConstant');
+				gui.add(universe, 'resetParticles');
+			}
+
+			function onWindowResize() {
+				camera.aspect = window.innerWidth / window.innerHeight;
+				camera.updateProjectionMatrix();
+				renderer.setSize(window.innerWidth, window.innerHeight);
+			}
+
+			function render() {
+				if (universe.isInitialized()) {
+					var attributes = object.geometry.attributes;
+					for (var i = 0; i < universe.getTotalParticles(); i++) {
+						var particle = universe.getParticle(i);
+						particle.update();
+
+						attributes.position.array[(i * 3)] = particle.x;
+						attributes.position.array[(i * 3) + 1] = particle.y;
+						attributes.position.array[(i * 3) + 2] = particle.z;
+
+						if (particle.isSizeDirty()) {
+							attributes.size.array[i] = particle.size;
+							attributes.size.needsUpdate = true;
+							particle.onSizeUpdated();
+						}
+					}
+
+					attributes.position.needsUpdate = true;
+				}
+
+				renderer.render(scene, camera);
+				stats.update();
+
+				requestAnimationFrame(render);
+			}
+		</script>
+	</body>
+</html>
